@@ -1,0 +1,89 @@
+---
+- name: Setup del servidor web (Apache)
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    min_space_mb: 700
+
+  pre_tasks:
+    - name: Obtenir espai lliure a /
+      command: df -m --output=avail /
+      register: disk_free
+      changed_when: false
+
+    - name: Calcular espai lliure real
+      set_fact:
+        free_mb: "{{ disk_free.stdout_lines[1] | int }}"
+
+    - name: Ajustar llindar fins que el servidor tingui prou espai
+      set_fact:
+        min_space_mb: "{{ free_mb | int }}"
+      when: free_mb | int < min_space_mb | int
+
+    - name: Verificar que hi ha prou espai per executar el play
+      debug:
+        msg: "S'executa perquè hi ha {{ free_mb }}MB lliures i el requeriment és {{ min_space_mb }}MB"
+
+  tasks:
+    - name: Instal·lar Apache
+      yum:
+        name: httpd
+        state: present
+
+    - name: Assegurar que Apache està arrencat i habilitat
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+
+    - name: Substituir 'Require all denied' per 'Require all granted'
+      replace:
+        path: /etc/httpd/conf/httpd.conf
+        regexp: "Require all denied"
+        replace: "Require all granted"
+
+    - name: Habilitar el servei HTTP al firewall
+      ansible.posix.firewalld:
+        service: http
+        permanent: yes
+        state: enabled
+        immediate: yes
+
+    - name: Assegurar que existeix /var/www/html
+      file:
+        path: /var/www/html
+        state: directory
+
+    - name: Crear index.html
+      copy:
+        dest: /var/www/html/index.html
+        content: "Web server managed by Ansible"
+
+# ------------------------------------------------------------------------------
+
+- name: Check del servidor web
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Obtenir status_code del web
+      uri:
+        url: http://localhost
+        return_content: yes
+      register: webcheck
+
+    - name: Guardar contingut de la web en una variable
+      set_fact:
+        webcontent: "{{ webcheck.content }}"
+
+    - name: Mostrar 'Content is right' si és correcte
+      debug:
+        msg: "Content is right"
+      when: "'Web server managed by Ansible' in webcontent"
+
+    - name: Mostrar 'Content has errors' en cas contrari
+      debug:
+        msg: "Content has errors"
+      when: "'Web server managed by Ansible' not in webcontent"
