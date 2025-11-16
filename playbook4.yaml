@@ -1,0 +1,95 @@
+---
+- name: LAB4 OpenSCAP - Escaneos, Tailoring y Fixes
+  hosts: localhost
+  become: true
+  vars:
+    base_dir: "/home/ansible/LAB4"
+    results_dir: "/home/ansible/LAB4/resultados"
+    tailoring_file: "/home/ansible/LAB4/resultados/tailoring-file.xml"
+    ssg_file: "/usr/share/xml/scap/ssg/content/ssg-fedora-ds.xml"
+
+  tasks:
+
+    - name: Instalar OpenSCAP y Security Guide
+      package:
+        name:
+          - openscap-scanner
+          - scap-security-guide
+        state: present
+
+    - name: Crear carpeta resultados
+      file:
+        path: "{{ results_dir }}"
+        state: directory
+        mode: '0755'
+
+    ###############################################################
+    #  1) ESCANEO OSPP (sin tailoring)
+    ###############################################################
+
+    - name: Escaneo OSPP por defecto
+      command: >
+        oscap xccdf eval
+        --profile xccdf_org.ssgproject.content_profile_ospp
+        --results {{ results_dir }}/results_default.xml
+        --report {{ results_dir }}/results_default.html
+        {{ ssg_file }}
+      failed_when: false
+
+    ###############################################################
+    #  2) GENERAR TAILORING
+    ###############################################################
+
+    - name: Crear tailoring OSPP (LAB4)
+      command: >
+        oscap xccdf generate tailored
+        --profile xccdf_org.ssgproject.content_profile_ospp
+        --output {{ tailoring_file }}
+        {{ ssg_file }}
+      failed_when: false
+
+    ###############################################################
+    #  3) ESCANEO CON TAILORING
+    ###############################################################
+
+    - name: Escaneo con tailoring
+      command: >
+        oscap xccdf eval
+        --profile xccdf_lab4_custom_profile
+        --tailoring-file {{ tailoring_file }}
+        --results {{ results_dir }}/lab-results-tailoring.xml
+        --report {{ results_dir }}/lab-results-tailoring.html
+        {{ ssg_file }}
+      failed_when: false
+
+    ###############################################################
+    #  4) APLICACIÓN DE FIXES (AUTO-REMEDIATION)
+    ###############################################################
+
+    - name: Aplicar fixes automáticos
+      command: >
+        oscap xccdf generate fix
+        --profile xccdf_lab4_custom_profile
+        --tailoring-file {{ tailoring_file }}
+        --fix-type bash
+        --output {{ results_dir }}/fixes.sh
+        {{ ssg_file }}
+      failed_when: false
+
+    - name: Ejecutar fixes.sh
+      command: bash {{ results_dir }}/fixes.sh
+      failed_when: false
+
+    ###############################################################
+    #  5) ESCANEO FINAL POST-FIX
+    ###############################################################
+
+    - name: Escaneo final tras aplicar fixes
+      command: >
+        oscap xccdf eval
+        --profile xccdf_lab4_custom_profile
+        --tailoring-file {{ tailoring_file }}
+        --results {{ results_dir }}/lab-results-tailoring-fixed.xml
+        --report {{ results_dir }}/lab-results-tailoring-fixed.html
+        {{ ssg_file }}
+      failed_when: false
